@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>古墳復元CG 現地位置合わせカメラ</title>
+  <style>
+    :root {
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #fff;
+      touch-action: manipulation;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    #app {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100dvh;
+      overflow: hidden;
+      background: #000;
+    }
+
+    #camera {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
+    }
+
+    /*
+      画面全体を基準領域とし、画像そのものは contain で縦横比を維持。
+      object-position: center bottom により常に画面下端へ寄せる。
+    */
+    #overlayWrap {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+      transform: translate(var(--shift-x, 0px), var(--shift-y, 0px)) scale(var(--overlay-scale, 1));
+      transform-origin: center bottom;
+    }
+
+    #overlay {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      object-position: center bottom;
+      opacity: var(--overlay-opacity, .55);
+      display: block;
+    }
+
+    #topBar {
+      position: absolute;
+      top: calc(var(--safe-top) + 10px);
+      left: calc(var(--safe-left) + 10px);
+      right: calc(var(--safe-right) + 10px);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      z-index: 20;
+      pointer-events: none;
+    }
+
+    .pill {
+      pointer-events: auto;
+      border: 1px solid rgba(255,255,255,.24);
+      background: rgba(0,0,0,.58);
+      color: #fff;
+      border-radius: 999px;
+      min-height: 42px;
+      padding: 0 14px;
+      font-size: 14px;
+      font-weight: 700;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+
+    #status {
+      pointer-events: none;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(0,0,0,.52);
+      font-size: 12px;
+      font-weight: 700;
+      max-width: 64vw;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #controls {
+      position: absolute;
+      left: calc(var(--safe-left) + 10px);
+      right: calc(var(--safe-right) + 10px);
+      bottom: calc(var(--safe-bottom) + 88px);
+      z-index: 20;
+      background: rgba(0,0,0,.62);
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 16px;
+      padding: 10px 12px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      transition: opacity .18s ease, transform .18s ease;
+    }
+
+    #controls.hidden {
+      opacity: 0;
+      transform: translateY(18px);
+      pointer-events: none;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 72px 1fr 48px;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
+    }
+
+    .row label {
+      font-size: 12px;
+      font-weight: 700;
+      opacity: .95;
+    }
+
+    input[type="range"] { width: 100%; }
+
+    .value {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-size: 12px;
+      opacity: .9;
+    }
+
+    .miniActions {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .miniActions button {
+      min-height: 40px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.18);
+      background: rgba(255,255,255,.10);
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    #bottomBar {
+      position: absolute;
+      left: calc(var(--safe-left) + 12px);
+      right: calc(var(--safe-right) + 12px);
+      bottom: calc(var(--safe-bottom) + 12px);
+      z-index: 25;
+      display: grid;
+      grid-template-columns: 1fr 76px 1fr;
+      align-items: center;
+      gap: 12px;
+    }
+
+    #bottomBar button {
+      border: 0;
+      color: #fff;
+      font-weight: 800;
+    }
+
+    #toggleOverlay, #toggleControls {
+      min-height: 46px;
+      border-radius: 14px;
+      padding: 0 12px;
+      background: rgba(0,0,0,.58);
+      border: 1px solid rgba(255,255,255,.22) !important;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+
+    #shutter {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: #fff;
+      border: 5px solid rgba(255,255,255,.45) !important;
+      box-shadow: 0 0 0 3px rgba(0,0,0,.32) inset;
+      justify-self: center;
+    }
+
+    #startScreen {
+      position: absolute;
+      inset: 0;
+      z-index: 50;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #000;
+    }
+
+    #startCard {
+      width: min(92vw, 420px);
+      text-align: center;
+    }
+
+    #startCard h1 {
+      margin: 0 0 10px;
+      font-size: 22px;
+    }
+
+    #startCard p {
+      margin: 0 0 18px;
+      line-height: 1.55;
+      font-size: 14px;
+      opacity: .82;
+    }
+
+    #missionText {
+      margin: 0 0 24px !important;
+      text-align: center;
+      font-size: 18px !important;
+      line-height: 1.7 !important;
+      font-weight: 800;
+      opacity: 1 !important;
+    }
+
+    #cameraConfirm {
+      margin-bottom: 12px !important;
+      font-size: 15px !important;
+      font-weight: 700;
+      opacity: 1 !important;
+    }
+
+    #startCamera {
+      width: 100%;
+      min-height: 52px;
+      border: 0;
+      border-radius: 14px;
+      background: #fff;
+      color: #000;
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    #error {
+      margin-top: 14px;
+      min-height: 20px;
+      color: #ffb4b4;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    #captureView {
+      position: absolute;
+      inset: 0;
+      z-index: 80;
+      display: none;
+      background: #000;
+    }
+
+    #captureView.open { display: block; }
+
+    #capturedImage {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+      -webkit-user-select: auto;
+      user-select: auto;
+      -webkit-touch-callout: default;
+    }
+
+    #captureActions {
+      position: absolute;
+      left: calc(var(--safe-left) + 12px);
+      right: calc(var(--safe-right) + 12px);
+      bottom: calc(var(--safe-bottom) + 12px);
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    #captureActions button, #captureActions a {
+      min-height: 48px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.22);
+      background: rgba(0,0,0,.68);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      text-decoration: none;
+      font-weight: 800;
+      font-size: 14px;
+    }
+
+    #captureHint {
+      position: absolute;
+      top: calc(var(--safe-top) + 12px);
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(0,0,0,.65);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    #flash {
+      position: absolute;
+      inset: 0;
+      background: #fff;
+      z-index: 70;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    #flash.on { animation: flash .18s ease-out; }
+    @keyframes flash {
+      0% { opacity: .9; }
+      100% { opacity: 0; }
+    }
+
+    @media (orientation: landscape) {
+      #controls { bottom: calc(var(--safe-bottom) + 76px); }
+      #bottomBar { grid-template-columns: 1fr 66px 1fr; }
+      #shutter { width: 62px; height: 62px; }
+    }
+  </style>
+</head>
+<body>
+  <main id="app">
+    <video id="camera" autoplay playsinline muted></video>
+
+    <div id="overlayWrap" aria-hidden="true">
+      <img id="overlay" src="image_overlay.png" alt="" draggable="false" />
+    </div>
+
+    <div id="topBar">
+      <div id="status">カメラ未起動</div>
+      <button id="fullscreen" class="pill" type="button">全画面</button>
+    </div>
+
+    <section id="controls" aria-label="復元CG調整">
+      <div class="row">
+        <label for="opacity">透明度</label>
+        <input id="opacity" type="range" min="0" max="100" value="55" />
+        <div id="opacityValue" class="value">55%</div>
+      </div>
+      <div class="row">
+        <label for="scale">大きさ</label>
+        <input id="scale" type="range" min="60" max="180" value="100" />
+        <div id="scaleValue" class="value">100%</div>
+      </div>
+      <div class="row">
+        <label for="shiftX">左右</label>
+        <input id="shiftX" type="range" min="-35" max="35" value="0" />
+        <div id="shiftXValue" class="value">0%</div>
+      </div>
+      <div class="row">
+        <label for="shiftY">上下</label>
+        <input id="shiftY" type="range" min="-35" max="35" value="0" />
+        <div id="shiftYValue" class="value">0%</div>
+      </div>
+      <div class="miniActions">
+        <button id="reset" type="button">初期位置</button>
+        <button id="captureMode" type="button">保存: 実景のみ</button>
+        <button id="cameraSwitch" type="button">カメラ切替</button>
+      </div>
+    </section>
+
+    <div id="bottomBar">
+      <button id="toggleOverlay" type="button">CG 非表示</button>
+      <button id="shutter" type="button" aria-label="撮影"></button>
+      <button id="toggleControls" type="button">調整を隠す</button>
+    </div>
+
+    <div id="flash"></div>
+
+    <section id="startScreen">
+      <div id="startCard">
+        <p id="missionText">ミッション：<br>芭蕉塚古墳に入って、古墳と同じ位置に行って写真を撮ろう！</p>
+        <p id="cameraConfirm">カメラを起動しますか？</p>
+        <button id="startCamera" type="button">カメラを起動する</button>
+        <div id="error" role="alert"></div>
+      </div>
+    </section>
+
+    <section id="captureView" aria-label="撮影結果">
+      <img id="capturedImage" alt="撮影結果" />
+      <div id="captureHint">iPhoneでは画像を長押しして「写真に保存」もできます</div>
+      <div id="captureActions">
+        <button id="closeCapture" type="button">戻る</button>
+        <a id="downloadCapture" download="kofun_photo.jpg">画像を保存</a>
+      </div>
+    </section>
+  </main>
+
+  <canvas id="canvas" hidden></canvas>
+
+  <script>
+    const video = document.getElementById('camera');
+    const overlayWrap = document.getElementById('overlayWrap');
+    const overlay = document.getElementById('overlay');
+    const startScreen = document.getElementById('startScreen');
+    const startCameraBtn = document.getElementById('startCamera');
+    const errorEl = document.getElementById('error');
+    const statusEl = document.getElementById('status');
+    const fullscreenBtn = document.getElementById('fullscreen');
+    const controls = document.getElementById('controls');
+    const toggleControls = document.getElementById('toggleControls');
+    const toggleOverlay = document.getElementById('toggleOverlay');
+    const shutter = document.getElementById('shutter');
+    const flash = document.getElementById('flash');
+    const canvas = document.getElementById('canvas');
+    const captureView = document.getElementById('captureView');
+    const capturedImage = document.getElementById('capturedImage');
+    const downloadCapture = document.getElementById('downloadCapture');
+    const closeCapture = document.getElementById('closeCapture');
+    const captureModeBtn = document.getElementById('captureMode');
+    const cameraSwitchBtn = document.getElementById('cameraSwitch');
+
+    const opacityInput = document.getElementById('opacity');
+    const scaleInput = document.getElementById('scale');
+    const shiftXInput = document.getElementById('shiftX');
+    const shiftYInput = document.getElementById('shiftY');
+    const opacityValue = document.getElementById('opacityValue');
+    const scaleValue = document.getElementById('scaleValue');
+    const shiftXValue = document.getElementById('shiftXValue');
+    const shiftYValue = document.getElementById('shiftYValue');
+    const resetBtn = document.getElementById('reset');
+
+    let stream = null;
+    let facingMode = 'environment';
+    let overlayVisible = true;
+    let includeOverlayInCapture = false;
+    let capturedUrl = null;
+
+    function updateOverlay() {
+      const opacity = Number(opacityInput.value) / 100;
+      const scale = Number(scaleInput.value) / 100;
+      const shiftX = Number(shiftXInput.value);
+      const shiftY = Number(shiftYInput.value);
+
+      overlayWrap.style.setProperty('--overlay-scale', scale);
+      overlayWrap.style.setProperty('--shift-x', `${shiftX}vw`);
+      overlayWrap.style.setProperty('--shift-y', `${shiftY}vh`);
+      overlay.style.setProperty('--overlay-opacity', opacityVisibleValue(opacity));
+
+      opacityValue.textContent = `${opacityInput.value}%`;
+      scaleValue.textContent = `${scaleInput.value}%`;
+      shiftXValue.textContent = `${shiftXInput.value}%`;
+      shiftYValue.textContent = `${shiftYInput.value}%`;
+    }
+
+    function opacityVisibleValue(value) {
+      return overlayVisible ? value : 0;
+    }
+
+    [opacityInput, scaleInput, shiftXInput, shiftYInput].forEach(el => {
+      el.addEventListener('input', updateOverlay);
+    });
+
+    resetBtn.addEventListener('click', () => {
+      opacityInput.value = 55;
+      scaleInput.value = 100;
+      shiftXInput.value = 0;
+      shiftYInput.value = 0;
+      overlayVisible = true;
+      toggleOverlay.textContent = 'CG 非表示';
+      updateOverlay();
+    });
+
+    toggleOverlay.addEventListener('click', () => {
+      overlayVisible = !overlayVisible;
+      toggleOverlay.textContent = overlayVisible ? 'CG 非表示' : 'CG 表示';
+      updateOverlay();
+    });
+
+    toggleControls.addEventListener('click', () => {
+      controls.classList.toggle('hidden');
+      toggleControls.textContent = controls.classList.contains('hidden') ? '調整を表示' : '調整を隠す';
+    });
+
+    captureModeBtn.addEventListener('click', () => {
+      includeOverlayInCapture = !includeOverlayInCapture;
+      captureModeBtn.textContent = includeOverlayInCapture ? '保存: CG込み' : '保存: 実景のみ';
+    });
+
+    fullscreenBtn.addEventListener('click', async () => {
+      try {
+        if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+          await document.documentElement.requestFullscreen();
+        } else if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        }
+      } catch (_) {
+        // iOS Safariなどでは非対応の場合があるため無視
+      }
+    });
+
+    async function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+      }
+    }
+
+    async function startCamera() {
+      errorEl.textContent = '';
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        errorEl.textContent = 'このブラウザはカメラAPIに対応していません。Safari / Chrome の最新版で開いてください。';
+        return;
+      }
+
+      await stopCamera();
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: facingMode },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          }
+        });
+
+        video.srcObject = stream;
+        await video.play();
+        startScreen.style.display = 'none';
+        statusEl.textContent = facingMode === 'environment' ? '背面カメラ' : '前面カメラ';
+      } catch (err) {
+        console.error(err);
+        errorEl.textContent = 'カメラを開始できません。ブラウザのカメラ許可と、GitHub Pages（HTTPS）で開いていることを確認してください。';
+      }
+    }
+
+    startCameraBtn.addEventListener('click', startCamera);
+
+    cameraSwitchBtn.addEventListener('click', async () => {
+      facingMode = facingMode === 'environment' ? 'user' : 'environment';
+      await startCamera();
+    });
+
+    // object-fit: cover と同じ見え方になるよう、動画の中央を切り出す。
+    function drawVideoCover(ctx, targetW, targetH) {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return false;
+
+      const srcRatio = vw / vh;
+      const dstRatio = targetW / targetH;
+      let sx = 0, sy = 0, sw = vw, sh = vh;
+
+      if (srcRatio > dstRatio) {
+        sw = vh * dstRatio;
+        sx = (vw - sw) / 2;
+      } else {
+        sh = vw / dstRatio;
+        sy = (vh - sh) / 2;
+      }
+
+      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, targetW, targetH);
+      return true;
+    }
+
+    function drawOverlayContainBottom(ctx, targetW, targetH) {
+      if (!includeOverlayInCapture || !overlayVisible || !overlay.complete || !overlay.naturalWidth) return;
+
+      const imgW = overlay.naturalWidth;
+      const imgH = overlay.naturalHeight;
+      const baseScale = Math.min(targetW / imgW, targetH / imgH);
+      const userScale = Number(scaleInput.value) / 100;
+      const drawW = imgW * baseScale * userScale;
+      const drawH = imgH * baseScale * userScale;
+
+      // CSSのvw/vhシフトを出力画像座標へ変換
+      const shiftX = (Number(shiftXInput.value) / 100) * targetW;
+      const shiftY = (Number(shiftYInput.value) / 100) * targetH;
+
+      const x = (targetW - drawW) / 2 + shiftX;
+      const y = targetH - drawH + shiftY;
+
+      ctx.save();
+      ctx.globalAlpha = Number(opacityInput.value) / 100;
+      ctx.drawImage(overlay, x, y, drawW, drawH);
+      ctx.restore();
+    }
+
+    function flashScreen() {
+      flash.classList.remove('on');
+      void flash.offsetWidth;
+      flash.classList.add('on');
+    }
+
+    shutter.addEventListener('click', () => {
+      if (!stream || !video.videoWidth) return;
+
+      const rect = document.getElementById('app').getBoundingClientRect();
+      const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+      const w = Math.max(1, Math.round(rect.width * dpr));
+      const h = Math.max(1, Math.round(rect.height * dpr));
+
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, w, h);
+
+      if (!drawVideoCover(ctx, w, h)) return;
+      drawOverlayContainBottom(ctx, w, h);
+      flashScreen();
+
+      canvas.toBlob(blob => {
+        if (!blob) return;
+        if (capturedUrl) URL.revokeObjectURL(capturedUrl);
+        capturedUrl = URL.createObjectURL(blob);
+        capturedImage.src = capturedUrl;
+        downloadCapture.href = capturedUrl;
+        downloadCapture.download = `kofun_${new Date().toISOString().replace(/[:.]/g, '-').slice(0,19)}.jpg`;
+        captureView.classList.add('open');
+      }, 'image/jpeg', 0.95);
+    });
+
+    closeCapture.addEventListener('click', () => {
+      captureView.classList.remove('open');
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && stream) {
+        video.play().catch(() => {});
+      }
+    });
+
+    window.addEventListener('beforeunload', stopCamera);
+    updateOverlay();
+  </script>
+</body>
+</html>
